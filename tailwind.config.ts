@@ -9,11 +9,13 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#17201b",
-        paper: "#f8faf7",
-        bay: "#236c67",
-        mango: "#f4a340",
-        clay: "#bf5b45"
+        ink: "#10231d",
+        paper: "#f6f8f5",
+        bay: "#0f7a5f",
+        mint: "#e7f5ef",
+        moss: "#22543d",
+        mango: "#b7791f",
+        clay: "#b42318"
       }
     }
   },

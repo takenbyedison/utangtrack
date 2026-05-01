@@ -109,6 +109,7 @@ create index reminders_loan_id_idx on public.reminders(loan_id);
 create or replace function public.get_loan_confirmation(invite_token uuid)
 returns table (
   loan_id uuid,
+  shared_by text,
   borrower_name text,
   purpose text,
   principal numeric,
@@ -123,6 +124,7 @@ set search_path = public
 as $$
   select
     loans.id as loan_id,
+    coalesce(users.full_name, users.email, 'UtangTrack user') as shared_by,
     borrowers.full_name as borrower_name,
     loans.purpose,
     loans.principal,
@@ -132,6 +134,7 @@ as $$
     loans.dispute_reason
   from public.loans
   join public.borrowers on borrowers.id = loans.borrower_id
+  join public.users on users.id = loans.lender_id
   where loans.confirmation_token = invite_token
   limit 1;
 $$;

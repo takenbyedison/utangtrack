@@ -15,7 +15,7 @@ async function createBorrower(formData: FormData) {
   if (userError || !user) {
     redirect(
       `/borrowers/new?error=${encodeURIComponent(
-        "Please log in before saving a borrower."
+        "Please log in before saving this person."
       )}`
     );
   }
@@ -42,7 +42,7 @@ async function createBorrower(formData: FormData) {
   if (error) {
     redirect(
       `/borrowers/new?error=${encodeURIComponent(
-        "Could not save borrower. Please try again."
+        "Could not save this person. Please try again."
       )}`
     );
   }
@@ -59,9 +59,8 @@ export default async function NewBorrowerPage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <PageHeading eyebrow="Borrower profile" title="Create borrower profile">
-        Save only the contact details needed to invite the borrower and track
-        private loans between you.
+      <PageHeading eyebrow="Add someone" title="Add someone you shared money with">
+        Save only the details you need to keep your own records clear.
       </PageHeading>
 
       <form
@@ -100,11 +99,11 @@ export default async function NewBorrowerPage({
           />
         </FormField>
 
-        <FormField label="Private notes">
+        <FormField label="Private note">
           <textarea
             className="focus-ring min-h-24 w-full rounded border border-ink/15 px-3 py-2"
             name="notes"
-            placeholder="How you know this borrower, preferred payment method, or consent notes."
+            placeholder="How you know this person, preferred payment method, or anything useful for your own records."
           />
         </FormField>
 
@@ -112,7 +111,7 @@ export default async function NewBorrowerPage({
           className="focus-ring rounded bg-bay px-4 py-2 font-semibold text-white"
           type="submit"
         >
-          Save borrower
+          Save person
         </button>
       </form>
     </div>

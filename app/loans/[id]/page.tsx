@@ -5,6 +5,7 @@ import { CopyInviteLink } from "@/components/copy-invite-link";
 import { PageHeading } from "@/components/page-heading";
 import { StatusBadge } from "@/components/status-badge";
 import { createClient } from "@/lib/supabase/server";
+import { sendConfirmationEmail } from "@/lib/invite-email";
 import type { LoanStatus } from "@/lib/types";
 import { headers } from "next/headers";
 
@@ -33,6 +34,78 @@ type PaymentRow = {
   note: string | null;
 };
 
+async function sendInviteEmail(loanId: string) {
+  "use server";
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userError
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    redirect("/auth?error=Please%20log%20in%20to%20send%20this%20record.");
+  }
+
+  const { data: loan, error: loanError } = await supabase
+    .from("loans")
+    .select("id, borrower_id, principal, due_date, purpose, confirmation_token")
+    .eq("id", loanId)
+    .eq("lender_id", user.id)
+    .single();
+
+  if (loanError || !loan) {
+    notFound();
+  }
+
+  const { data: borrower, error: borrowerError } = await supabase
+    .from("borrowers")
+    .select("full_name, email")
+    .eq("id", loan.borrower_id)
+    .eq("lender_id", user.id)
+    .single();
+
+  if (borrowerError || !borrower) {
+    redirect(
+      `/loans/${loanId}?invite_error=${encodeURIComponent(
+        "Could not load this person’s details."
+      )}`
+    );
+  }
+
+  if (!borrower.email) {
+    redirect(
+      `/loans/${loanId}?invite_error=${encodeURIComponent(
+        "Email is missing. Add an email before sending this record."
+      )}`
+    );
+  }
+
+  const result = await sendConfirmationEmail({
+    loanId,
+    to: borrower.email,
+    personName: borrower.full_name,
+    purpose: loan.purpose,
+    amount: formatPeso(loan.principal),
+    targetDate: loan.due_date,
+    confirmationToken: loan.confirmation_token
+  });
+
+  if (!result.ok) {
+    redirect(
+      `/loans/${loanId}?invite_error=${encodeURIComponent(
+        result.message
+      )}`
+    );
+  }
+
+  redirect(
+    `/loans/${loanId}?invite_success=${encodeURIComponent(
+      "Confirmation email sent."
+    )}`
+  );
+}
+
 function formatPeso(amount: number | string) {
   return new Intl.NumberFormat("en-PH", {
     style: "currency",
@@ -42,11 +115,15 @@ function formatPeso(amount: number | string) {
 }
 
 export default async function LoanDetailPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ invite_error?: string; invite_success?: string }>;
 }) {
   const { id } = await params;
+  const { invite_error: inviteError, invite_success: inviteSuccess } =
+    await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -54,7 +131,7 @@ export default async function LoanDetailPage({
   } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    redirect("/auth?error=Please%20log%20in%20to%20view%20this%20loan.");
+    redirect("/auth?error=Please%20log%20in%20to%20view%20this%20record.");
   }
 
   const headerStore = await headers();
@@ -77,7 +154,8 @@ export default async function LoanDetailPage({
 
   const loanRow = loan as LoanRow;
   const invitePath = `/confirm/${loanRow.confirmation_token}`;
-  const inviteUrl = `${appOrigin}${invitePath}`;
+  const configuredAppUrl = process.env.APP_URL?.replace(/\/$/, "");
+  const inviteUrl = `${configuredAppUrl || appOrigin}${invitePath}`;
 
   const [{ data: borrower }, { data: payments }] = await Promise.all([
     supabase
@@ -100,10 +178,10 @@ export default async function LoanDetailPage({
   return (
     <div>
       <PageHeading
-        eyebrow="Loan detail"
-        title={borrowerRow?.full_name ?? "Borrower"}
+        eyebrow="Record details"
+        title={borrowerRow?.full_name ?? "Person"}
       >
-        Private record owned by your lender account.
+        Private record between you and this person.
       </PageHeading>
 
       <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
@@ -115,20 +193,22 @@ export default async function LoanDetailPage({
 
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-ink/60">Principal</dt>
+              <dt className="text-ink/60">Amount you gave</dt>
               <dd className="font-semibold">{formatPeso(loanRow.principal)}</dd>
             </div>
             <div>
-              <dt className="text-ink/60">Balance</dt>
+              <dt className="text-ink/60">Remaining</dt>
               <dd className="font-semibold">{formatPeso(loanRow.balance)}</dd>
             </div>
             <div>
-              <dt className="text-ink/60">Due date</dt>
+              <dt className="text-ink/60">Target date</dt>
               <dd className="font-semibold">{loanRow.due_date}</dd>
             </div>
             <div>
-              <dt className="text-ink/60">Status</dt>
-              <dd className="font-semibold">{loanRow.status}</dd>
+              <dt className="text-ink/60">Current status</dt>
+              <dd>
+                <StatusBadge status={loanRow.status} />
+              </dd>
             </div>
           </dl>
 
@@ -144,9 +224,9 @@ export default async function LoanDetailPage({
         </div>
 
         <aside className="rounded border border-ink/10 bg-white p-4">
-          <h2 className="font-semibold">Borrower profile</h2>
+          <h2 className="font-semibold">Person details</h2>
           <div className="mt-3 space-y-2 text-sm text-ink/75">
-            <p className="font-semibold">{borrowerRow?.full_name ?? "Borrower"}</p>
+            <p className="font-semibold">{borrowerRow?.full_name ?? "Person"}</p>
             {borrowerRow?.phone ? <p>{borrowerRow.phone}</p> : null}
             {borrowerRow?.email ? <p>{borrowerRow.email}</p> : null}
             {!borrowerRow?.phone && !borrowerRow?.email ? (
@@ -158,24 +238,47 @@ export default async function LoanDetailPage({
 
       <section className="mt-6 rounded border border-ink/10 bg-white">
         <div className="border-b border-ink/10 px-4 py-3">
-          <h2 className="font-semibold">Borrower invite</h2>
+          <h2 className="font-semibold">Share this record</h2>
         </div>
         <div className="p-4 text-sm text-ink/75">
           <p>
-            Send this confirmation link to the borrower by email or SMS later.
-            For now, UtangTrack only creates the invite link and does not send
-            messages.
+            Send this to them so both of you can agree on the details before
+            tracking payments.
           </p>
+          {inviteSuccess ? (
+            <p className="mt-3 rounded border border-bay/20 bg-bay/5 px-3 py-2 text-sm text-bay">
+              {inviteSuccess}
+            </p>
+          ) : null}
+          {inviteError ? (
+            <p className="mt-3 rounded border border-clay/20 bg-clay/5 px-3 py-2 text-sm text-clay">
+              {inviteError}
+            </p>
+          ) : null}
+          {!borrowerRow?.email ? (
+            <p className="mt-3 rounded border border-mango/30 bg-mango/10 px-3 py-2 text-sm text-ink">
+              Email is missing. Add an email before sending this record.
+            </p>
+          ) : null}
           <div className="mt-3 overflow-hidden rounded border border-ink/15 bg-paper px-3 py-2 font-mono text-xs text-ink">
             {inviteUrl || invitePath}
           </div>
           <div className="mt-3 flex flex-wrap gap-3">
+            <form action={sendInviteEmail.bind(null, loanRow.id)}>
+              <button
+                className="focus-ring rounded bg-bay px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!borrowerRow?.email}
+                type="submit"
+              >
+                Send confirmation email
+              </button>
+            </form>
             <CopyInviteLink inviteUrl={inviteUrl || invitePath} />
             <Link
               className="focus-ring rounded border border-ink/15 px-4 py-2 font-semibold text-ink"
               href={invitePath}
             >
-              Open invite
+              Preview link
             </Link>
           </div>
         </div>

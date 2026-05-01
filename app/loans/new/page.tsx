@@ -1,15 +1,26 @@
-import Link from "next/link";
-import { FormField } from "@/components/form-field";
+import { NewRecordForm } from "@/components/new-record-form";
 import { PageHeading } from "@/components/page-heading";
+import { sendConfirmationEmail } from "@/lib/invite-email";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
-type BorrowerOption = {
+type PersonOption = {
   id: string;
   full_name: string;
 };
 
-async function createLoan(formData: FormData) {
+type PersonForInvite = {
+  id: string;
+  full_name: string;
+  email: string | null;
+};
+
+type CreatedRecord = {
+  id: string;
+  confirmation_token: string;
+};
+
+async function createRecord(formData: FormData) {
   "use server";
 
   const supabase = await createClient();
@@ -19,63 +30,148 @@ async function createLoan(formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    redirect("/auth?error=Please%20log%20in%20before%20creating%20a%20loan.");
+    redirect("/auth?error=Please%20log%20in%20before%20adding%20a%20record.");
   }
 
-  const borrowerId = String(formData.get("borrower_id") ?? "").trim();
-  const principalText = String(formData.get("principal") ?? "").trim();
+  const selectedPersonId = String(formData.get("borrower_id") ?? "").trim();
+  const amountText = String(formData.get("principal") ?? "").trim();
   const dueDate = String(formData.get("due_date") ?? "").trim();
   const purpose = String(formData.get("purpose") ?? "").trim();
-  const principal = Number(principalText);
+  const amount = Number(amountText);
 
-  if (!borrowerId || !principalText || !dueDate || !purpose) {
+  if (!selectedPersonId || !amountText || !dueDate || !purpose) {
     redirect(
-      `/loans/new?error=${encodeURIComponent("All loan fields are required.")}`
+      `/loans/new?error=${encodeURIComponent("All record fields are required.")}`
     );
   }
 
-  if (!Number.isFinite(principal) || principal <= 0) {
+  if (!Number.isFinite(amount) || amount <= 0) {
     redirect(
       `/loans/new?error=${encodeURIComponent(
-        "Principal amount must be greater than zero."
+        "Amount must be greater than zero."
       )}`
     );
   }
 
-  const { data: borrower, error: borrowerError } = await supabase
-    .from("borrowers")
-    .select("id")
-    .eq("id", borrowerId)
-    .eq("lender_id", user.id)
+  let person: PersonForInvite | null = null;
+
+  if (selectedPersonId === "__new__") {
+    const fullName = String(formData.get("new_full_name") ?? "").trim();
+    const phone = String(formData.get("new_phone") ?? "").trim();
+    const email = String(formData.get("new_email") ?? "").trim();
+    const notes = String(formData.get("new_notes") ?? "").trim();
+
+    if (!fullName) {
+      redirect(
+        `/loans/new?error=${encodeURIComponent(
+          "Full name is required when adding someone new."
+        )}`
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("borrowers")
+      .insert({
+        lender_id: user.id,
+        full_name: fullName,
+        phone: phone || null,
+        email: email || null,
+        notes: notes || null
+      })
+      .select("id, full_name, email")
+      .single();
+
+    if (error || !data) {
+      redirect(
+        `/loans/new?error=${encodeURIComponent(
+          "Could not save this person. Please try again."
+        )}`
+      );
+    }
+
+    person = data as PersonForInvite;
+  } else {
+    const { data, error } = await supabase
+      .from("borrowers")
+      .select("id, full_name, email")
+      .eq("id", selectedPersonId)
+      .eq("lender_id", user.id)
+      .single();
+
+    if (error || !data) {
+      redirect(
+        `/loans/new?error=${encodeURIComponent(
+          "Please choose someone from your saved people."
+        )}`
+      );
+    }
+
+    person = data as PersonForInvite;
+  }
+
+  const { data: record, error: recordError } = await supabase
+    .from("loans")
+    .insert({
+      lender_id: user.id,
+      borrower_id: person.id,
+      principal: amount,
+      balance: amount,
+      due_date: dueDate,
+      purpose,
+      status: "pending confirmation"
+    })
+    .select("id, confirmation_token")
     .single();
 
-  if (borrowerError || !borrower) {
+  if (recordError || !record) {
     redirect(
       `/loans/new?error=${encodeURIComponent(
-        "Please choose one of your saved borrowers."
+        "Could not save this record. Please try again."
       )}`
     );
   }
 
-  const { error } = await supabase.from("loans").insert({
-    lender_id: user.id,
-    borrower_id: borrowerId,
-    principal,
-    balance: principal,
-    due_date: dueDate,
+  const savedRecord = record as CreatedRecord;
+
+  if (!person.email) {
+    redirect(
+      `/loans/${savedRecord.id}?invite_error=${encodeURIComponent(
+        "Record saved. Add an email to send a confirmation request."
+      )}`
+    );
+  }
+
+  const emailResult = await sendConfirmationEmail({
+    loanId: savedRecord.id,
+    to: person.email,
+    personName: person.full_name,
     purpose,
-    status: "pending confirmation"
+    amount: formatPeso(amount),
+    targetDate: dueDate,
+    confirmationToken: savedRecord.confirmation_token
   });
 
-  if (error) {
+  if (!emailResult.ok) {
     redirect(
-      `/loans/new?error=${encodeURIComponent(
-        "Could not save loan. Please try again."
+      `/loans/${savedRecord.id}?invite_error=${encodeURIComponent(
+        "Record saved, but the confirmation email could not be sent. You can resend it from this page."
       )}`
     );
   }
 
-  redirect("/dashboard");
+  redirect(
+    `/loans/${savedRecord.id}?invite_success=${encodeURIComponent(
+      "Confirmation email sent."
+    )}`
+  );
+}
+
+function formatPeso(amount: number | string) {
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    maximumFractionDigits: 0
+  }).format(Number(amount));
 }
 
 export default async function NewLoanPage({
@@ -91,100 +187,41 @@ export default async function NewLoanPage({
   } = await supabase.auth.getUser();
 
   if (userError || !user) {
-    redirect("/auth?error=Please%20log%20in%20before%20creating%20a%20loan.");
+    redirect("/auth?error=Please%20log%20in%20before%20adding%20a%20record.");
   }
 
-  const { data: borrowers, error: borrowersError } = await supabase
+  const { data: people, error: peopleError } = await supabase
     .from("borrowers")
     .select("id, full_name")
     .eq("lender_id", user.id)
     .order("full_name", { ascending: true });
 
-  const borrowerOptions = (borrowers ?? []) as BorrowerOption[];
-  const formError = error ?? (borrowersError ? "Could not load borrowers." : null);
+  const personOptions = (people ?? []) as PersonOption[];
+  const formError = error ?? (peopleError ? "Could not load people." : null);
 
   return (
     <div className="mx-auto max-w-2xl">
-      <PageHeading eyebrow="Loan record" title="Create loan record">
-        The borrower should be invited to confirm or dispute this loan before it
-        is treated as agreed.
+      <PageHeading eyebrow="New record" title="Add a money record">
+        Write down what was shared, then send it for confirmation so both sides
+        are clear.
       </PageHeading>
 
       <form
-        action={createLoan}
+        action={createRecord}
         className="space-y-4 rounded border border-ink/10 bg-white p-4"
       >
-        {formError ? (
-          <p className="rounded border border-clay/20 bg-clay/5 px-3 py-2 text-sm text-clay">
-            {formError}
-          </p>
-        ) : null}
-
-        {borrowerOptions.length === 0 ? (
-          <p className="rounded border border-mango/30 bg-mango/10 px-3 py-2 text-sm text-ink">
-            Add a borrower before creating a loan.{" "}
-            <Link className="font-semibold text-bay" href="/borrowers/new">
-              Create borrower
-            </Link>
-          </p>
-        ) : null}
-
-        <FormField label="Borrower">
-          <select
-            className="focus-ring w-full rounded border border-ink/15 px-3 py-2"
-            defaultValue=""
-            disabled={borrowerOptions.length === 0}
-            name="borrower_id"
-            required
-          >
-            <option value="" disabled>
-              Select borrower
-            </option>
-            {borrowerOptions.map((borrower) => (
-              <option key={borrower.id} value={borrower.id}>
-                {borrower.full_name}
-              </option>
-            ))}
-          </select>
-        </FormField>
-
-        <FormField label="Principal amount">
-          <input
-            className="focus-ring w-full rounded border border-ink/15 px-3 py-2"
-            min="1"
-            name="principal"
-            placeholder="5000"
-            required
-            step="0.01"
-            type="number"
-          />
-        </FormField>
-
-        <FormField label="Due date">
-          <input
-            className="focus-ring w-full rounded border border-ink/15 px-3 py-2"
-            name="due_date"
-            required
-            type="date"
-          />
-        </FormField>
-
-        <FormField label="Purpose or memo">
-          <textarea
-            className="focus-ring min-h-24 w-full rounded border border-ink/15 px-3 py-2"
-            name="purpose"
-            placeholder="Short, factual loan description."
-            required
-          />
-        </FormField>
+        <NewRecordForm formError={formError} people={personOptions} />
 
         <button
-          className="focus-ring rounded bg-bay px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={borrowerOptions.length === 0}
+          className="focus-ring rounded bg-bay px-4 py-2 font-semibold text-white"
           type="submit"
         >
-          Save and create confirmation invite
+          Save and send for confirmation
         </button>
+        <p className="text-sm text-ink/65">
+          The other person can confirm or correct this record before you track
+          payments.
+        </p>
       </form>
     </div>
   );

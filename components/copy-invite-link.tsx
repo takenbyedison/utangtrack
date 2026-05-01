@@ -16,7 +16,7 @@ export function CopyInviteLink({ inviteUrl }: { inviteUrl: string }) {
       onClick={copyInviteLink}
       type="button"
     >
-      {copied ? "Copied" : "Copy invite link"}
+      {copied ? "Copied" : "Copy link"}
     </button>
   );
 }

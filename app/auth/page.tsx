@@ -82,8 +82,9 @@ export default async function AuthPage({
 
   return (
     <div className="mx-auto max-w-md">
-      <PageHeading eyebrow="Account" title="Register or login">
-        Use email and password to access your private lender dashboard.
+      <PageHeading eyebrow="Secure access" title="Sign in to UtangTrack">
+        Use email and password to keep your utang records safe and easy to
+        review.
       </PageHeading>
 
       <form className="space-y-4 rounded border border-ink/10 bg-white p-4">

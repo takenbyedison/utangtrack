@@ -34,7 +34,7 @@ async function createPayment(loanId: string, formData: FormData) {
   if (!amountText || !paidAt) {
     redirect(
       `/loans/${loanId}/payments/new?error=${encodeURIComponent(
-        "Payment amount and date are required."
+        "Amount and date are required."
       )}`
     );
   }
@@ -42,7 +42,7 @@ async function createPayment(loanId: string, formData: FormData) {
   if (!Number.isFinite(amount) || amount <= 0) {
     redirect(
       `/loans/${loanId}/payments/new?error=${encodeURIComponent(
-        "Payment amount must be greater than zero."
+        "Amount must be greater than zero."
       )}`
     );
   }
@@ -90,7 +90,7 @@ async function createPayment(loanId: string, formData: FormData) {
   if (loanUpdateError) {
     redirect(
       `/loans/${loanId}/payments/new?error=${encodeURIComponent(
-        "Payment saved, but the loan balance could not be updated."
+        "Payment saved, but the remaining amount could not be updated."
       )}`
     );
   }
@@ -149,9 +149,9 @@ export default async function AddPaymentPage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <PageHeading eyebrow="Payment" title="Add payment">
-        Record a payment for {borrowerRow?.full_name ?? "this borrower"}.
-        Current balance is {formatPeso(loanRow.balance)}.
+      <PageHeading eyebrow="Add payment" title="Record money returned">
+        Add a payment when this person gives money back. Remaining amount is{" "}
+        {formatPeso(loanRow.balance)}.
       </PageHeading>
 
       <form
@@ -164,7 +164,7 @@ export default async function AddPaymentPage({
           </p>
         ) : null}
 
-        <FormField label="Payment amount">
+        <FormField label="Amount returned">
           <input
             className="focus-ring w-full rounded border border-ink/15 px-3 py-2"
             min="1"
@@ -176,7 +176,7 @@ export default async function AddPaymentPage({
           />
         </FormField>
 
-        <FormField label="Payment date">
+        <FormField label="Date received">
           <input
             className="focus-ring w-full rounded border border-ink/15 px-3 py-2"
             name="paid_at"
@@ -185,11 +185,11 @@ export default async function AddPaymentPage({
           />
         </FormField>
 
-        <FormField label="Payment note">
+        <FormField label="Note">
           <input
             className="focus-ring w-full rounded border border-ink/15 px-3 py-2"
             name="note"
-            placeholder="Cash, bank transfer, or other note"
+            placeholder="Cash, bank transfer, reference number, or note"
           />
         </FormField>
 
